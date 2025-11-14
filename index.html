@@ -30,6 +30,11 @@
             50% { background-position: 100% 50%; }
             100% { background-position: 0% 50%; }
         }
+        /* Style untuk tombol loading */
+        button:disabled {
+            opacity: 0.7;
+            cursor: not-allowed;
+        }
     </style>
 </head>
 <body class="bg-gray-100">
@@ -65,6 +70,17 @@
             </header>
 
             <main id="content" class="p-4 pb-20">
+                <!-- PERBAIKAN: Indikator Loading Ditambahkan -->
+                <div id="loading-indicator" class="page p-8 text-center hidden">
+                    <div class="flex justify-center items-center">
+                        <svg class="animate-spin -ml-1 mr-3 h-8 w-8 text-teal-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                        <span class="text-lg font-medium text-gray-600">Memuat data...</span>
+                    </div>
+                </div>
+
                 <!-- Halaman Dashboard -->
                 <div id="dashboard-page" class="page">
                     <div class="grid grid-cols-1 gap-4 mb-6">
@@ -233,6 +249,9 @@
                         </div>
                     </div>
                     
+                    <!-- PERBAIKAN: Bagian Ringkasan Hasil Filter ditambahkan di sini -->
+                    <div id="report-summary" class="mb-6"></div>
+
                     <!-- Statistics Section -->
                     <div id="report-stats" class="mb-6"></div>
 
@@ -382,6 +401,7 @@
         const pageTitle = document.getElementById('page-title');
         const content = document.getElementById('content');
         const userRoleDisplay = document.getElementById('user-role-display');
+        const loadingIndicator = document.getElementById('loading-indicator'); 
         
         // Dashboard elements
         const balanceEl = document.getElementById('balance');
@@ -415,6 +435,7 @@
         const downloadLinkContainer = document.getElementById('download-link-container');
         const pdfDownloadLinkInput = document.getElementById('pdf-download-link');
         const copyLinkButton = document.getElementById('copy-link-button');
+        const reportSummaryEl = document.getElementById('report-summary'); // PERBAIKAN: Elemen ringkasan filter
 
         // Gemini elements
         const geminiSummarySection = document.getElementById('gemini-summary-section');
@@ -452,8 +473,13 @@
 
         const switchPage = (pageId) => {
             document.querySelectorAll('.page').forEach(page => page.classList.add('hidden'));
-            document.getElementById(pageId).classList.remove('hidden');
             
+            // Pastikan loader tidak ikut disembunyikan jika itu adalah target
+            const targetPage = document.getElementById(pageId);
+            if (targetPage) {
+                 targetPage.classList.remove('hidden');
+            }
+           
             const titleMap = {
                 'dashboard-page': 'Dashboard',
                 'add-income-page': 'Tambah Pemasukan',
@@ -562,8 +588,9 @@
         }
 
 
+        // PERBAIKAN: Fungsi dioptimalkan untuk render ringkasan filter & daftar transaksi
         const renderDashboardAndReports = (allTrx, filteredTrx) => {
-            // Calculate totals based on ALL transactions for the dashboard cards
+            // === 1. Update Dashboard Cards (menggunakan SEMUA transaksi) ===
             let totalIncome = 0;
             let totalExpense = 0;
             allTrx.forEach(trx => {
@@ -577,29 +604,63 @@
             totalIncomeEl.textContent = formatCurrency(totalIncome);
             totalExpenseEl.textContent = formatCurrency(totalExpense);
 
-            // Render recent transactions (from ALL transactions)
+            // === 2. Render Recent Transactions (dari SEMUA transaksi) ===
             recentTransactionsEl.innerHTML = '';
             const sortedAllTrx = [...allTrx].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
             sortedAllTrx.slice(0, 5).forEach(trx => {
                 recentTransactionsEl.innerHTML += createTrxElementHTML(trx);
             });
 
-            // Render report list (from FILTERED transactions)
-            allTransactionsListEl.innerHTML = '';
+            // === 3. Render Report Summary (menggunakan data FILTER) ===
+            let totalIncomeFiltered = 0;
+            let totalExpenseFiltered = 0;
+            filteredTrx.forEach(trx => {
+                if (trx.jenis === 'pemasukan') {
+                    totalIncomeFiltered += trx.nominal || 0;
+                } else {
+                    totalExpenseFiltered += trx.nominal || 0;
+                }
+            });
+            const balanceFiltered = totalIncomeFiltered - totalExpenseFiltered;
+
+            reportSummaryEl.innerHTML = `
+                <h3 class="text-lg font-semibold text-gray-700 mb-3">Ringkasan Hasil Filter</h3>
+                <div class="grid grid-cols-1 gap-4">
+                    <div class="bg-blue-50 border border-blue-200 p-4 rounded-lg">
+                        <p class="text-sm text-blue-600">Sisa Saldo (Filter)</p>
+                        <p class="text-2xl font-bold text-blue-800">${formatCurrency(balanceFiltered)}</p>
+                    </div>
+                    <div class="bg-green-50 border border-green-200 p-4 rounded-lg">
+                        <p class="text-sm text-green-600">Total Pemasukan (Filter)</p>
+                        <p class="text-xl font-semibold text-green-800">${formatCurrency(totalIncomeFiltered)}</p>
+                    </div>
+                    <div class="bg-red-50 border border-red-200 p-4 rounded-lg">
+                        <p class="text-sm text-red-600">Total Pengeluaran (Filter)</p>
+                        <p class="text-xl font-semibold text-red-800">${formatCurrency(totalExpenseFiltered)}</p>
+                    </div>
+                </div>
+            `;
+
+            // === 4. Render Report List (dari data FILTER) - OPTIMASI KINERJA ===
             const sortedFilteredTrx = [...filteredTrx].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
             if (sortedFilteredTrx.length === 0) {
                 allTransactionsListEl.innerHTML = '<p class="text-center text-gray-500">Tidak ada data yang cocok dengan filter.</p>';
             } else {
-                sortedFilteredTrx.forEach(trx => {
-                    allTransactionsListEl.innerHTML += createTrxElementHTML(trx);
-                });
+                // PERBAIKAN: Menggunakan map().join() untuk render performa tinggi
+                // Ini menggantikan loop forEach dengan innerHTML +=
+                const htmlChunks = sortedFilteredTrx.map(trx => createTrxElementHTML(trx));
+                allTransactionsListEl.innerHTML = htmlChunks.join('');
             }
 
-            // Render the stats section for reports page
+            // === 5. Render Stats (dari data FILTER) ===
             renderStats(filteredTrx);
         }
 
         const displayData = () => {
+            // PERBAIKAN: Tampilkan loading di tombol filter
+            applyFilterButton.textContent = 'Memfilter...';
+            applyFilterButton.disabled = true;
+
             const startDate = filterStartDate.value;
             const endDate = filterEndDate.value;
             const type = filterType.value;
@@ -626,41 +687,61 @@
             geminiSummaryPlaceholder.classList.remove('hidden');
             geminiSummaryPlaceholder.textContent = 'Klik tombol untuk membuat ringkasan laporan dengan AI.';
 
-
+            // Panggil fungsi render utama
             renderDashboardAndReports(transactions, filteredTransactions);
+
+            // PERBAIKAN: Kembalikan tombol filter ke normal
+            applyFilterButton.textContent = 'Terapkan Filter';
+            applyFilterButton.disabled = false;
         }
         
         const fetchData = async () => {
             if (!currentUser) return;
             
-            // Fetch all profiles if admin, to populate the filter dropdown
+            let profilesPromise = Promise.resolve({ data: null, error: null }); 
+            let transactionsPromise;
+
             if (currentUserRole === 'admin') {
+                console.log("DEBUG: Menjalankan dalam mode ADMIN. Menyiapkan query profil.");
+                profilesPromise = db.from('profiles').select('id, email');
                 geminiSummarySection.classList.remove('hidden');
-                console.log("DEBUG: Menjalankan dalam mode ADMIN. Mengambil semua profil.");
-                const { data: profilesData } = await db.from('profiles').select('id, email');
-                if (profilesData) {
-                    allUsers = profilesData;
-                    adminFilterUserContainer.classList.remove('hidden');
-                    filterUser.innerHTML = '<option value="semua">Semua Pengguna</option>';
-                    allUsers.forEach(user => {
-                        const option = document.createElement('option');
-                        option.value = user.id;
-                        option.textContent = user.email;
-                        filterUser.appendChild(option);
-                    });
-                }
             } else {
+                 console.log("DEBUG: Menjalankan dalam mode USER BIASA.");
                  geminiSummarySection.classList.add('hidden');
             }
 
             let transactionsQuery = db.from('transactions').select('*');
             if (currentUserRole !== 'admin') {
-                console.log("DEBUG: Menjalankan dalam mode USER BIASA. Hanya mengambil data milik sendiri.");
+                console.log("DEBUG: Hanya mengambil data milik sendiri.");
                 transactionsQuery = transactionsQuery.eq('user_id', currentUser.id);
             } else {
-                console.log("DEBUG: Menjalankan dalam mode ADMIN. Mengambil semua transaksi.");
+                console.log("DEBUG: Mengambil semua transaksi.");
             }
-            const { data: transactionsData, error: transactionsError } = await transactionsQuery;
+            transactionsPromise = transactionsQuery;
+
+            console.log("DEBUG: Menjalankan query profil dan transaksi secara paralel...");
+            const [profilesResult, transactionsResult] = await Promise.all([
+                profilesPromise,
+                transactionsPromise
+            ]);
+            console.log("DEBUG: Kedua query selesai.");
+
+            if (profilesResult && profilesResult.data) {
+                const profilesData = profilesResult.data;
+                allUsers = profilesData;
+                adminFilterUserContainer.classList.remove('hidden');
+                filterUser.innerHTML = '<option value="semua">Semua Pengguna</option>';
+                allUsers.forEach(user => {
+                    const option = document.createElement('option');
+                    option.value = user.id;
+                    option.textContent = user.email;
+                    filterUser.appendChild(option);
+                });
+            } else if (profilesResult && profilesResult.error) {
+                console.warn("Gagal mengambil profil (tidak fatal):", profilesResult.error.message);
+            }
+
+            const { data: transactionsData, error: transactionsError } = transactionsResult;
 
             if (transactionsError) {
                 console.error('Error fetching transactions:', transactionsError);
@@ -673,7 +754,6 @@
                 return;
             }
             
-            // Populate category filter
             const categories = [...new Set(transactionsData.map(t => t.kategori).filter(c => c))];
             filterCategory.innerHTML = '<option value="semua">Semua Kategori</option>';
             categories.forEach(cat => {
@@ -682,7 +762,6 @@
                 option.textContent = cat;
                 filterCategory.appendChild(option);
             });
-
 
             const profilesMap = new Map(allUsers.map(p => [p.id, p.email]));
             const formattedData = transactionsData.map(trx => ({
@@ -695,7 +774,6 @@
         };
 
         const getUserProfile = async (user) => {
-            // Menghapus .single() untuk menangani kasus duplikat profil di database
             const { data, error } = await db.from('profiles').select('role').eq('id', user.id);
 
             if (error) {
@@ -713,7 +791,6 @@
                 console.warn(`PERINGATAN: Ditemukan duplikat profil untuk user ${user.email}. Menggunakan peran dari profil pertama.`);
             }
 
-            // Mengambil peran dari data pertama yang ditemukan
             const role = data[0] ? data[0].role : 'user';
             console.log(`DEBUG: Peran untuk user ${user.email} adalah '${role}'.`);
             return role;
@@ -722,11 +799,19 @@
         const handleAuthSuccess = async (user) => {
             loginPage.classList.add('hidden');
             mainApp.classList.remove('hidden');
-            switchPage('dashboard-page');
+            
+            document.querySelectorAll('.page').forEach(page => page.classList.add('hidden'));
+            loadingIndicator.classList.remove('hidden');
+            pageTitle.textContent = 'Memuat...';
+            
             currentUser = user;
             currentUserRole = await getUserProfile(user);
             userRoleDisplay.textContent = `Peran: ${currentUserRole}`;
-            await fetchData();
+            
+            await fetchData(); 
+            
+            loadingIndicator.classList.add('hidden');
+            switchPage('dashboard-page'); 
         };
 
         loginButton.addEventListener('click', async () => {
@@ -759,7 +844,6 @@
             mainApp.classList.add('hidden');
             emailInput.value = '';
             passwordInput.value = '';
-            // Reset filters on logout
             adminFilterUserContainer.classList.add('hidden');
             filterStartDate.value = '';
             filterEndDate.value = '';
@@ -820,12 +904,10 @@
             const editDapurContainer = document.getElementById('edit-dapur-container');
             const editDapurKategori = document.getElementById('edit-dapur-kategori');
             
-            // Format tanggal YYYY-MM-DD
             editTanggal.value = new Date(trx.created_at).toISOString().split('T')[0];
             editNominal.value = trx.nominal;
             editKeterangan.value = trx.keterangan || '';
 
-            // Populate kategori
             const categoryOptions = trx.jenis === 'pemasukan' 
                 ? ['Dari Yayasan', 'Infaq Walisantri', 'Infaq Lainnya']
                 : ['Pembayaran Listrik', 'Pembayaran Indihome', 'Pembayaran Air', 'Kontribusi Lingkungan', 'Kebutuhan Dapur', 'Laundry', 'Kebutuhan Santri', 'Jajanan Santri', 'Bekal Santri', 'Futsal', 'Service Motor', 'Ganti Oli', 'Konsumsi', 'Dekorasi', 'Perlengkapan Pondok', 'Buah-Buahan', 'Transportasi/Ojek', 'Jumber Pejuang', 'ATK', 'Lainnya'];
@@ -912,7 +994,6 @@
             });
         });
 
-        // Form Submission
         const handleFormSubmit = async (event, type) => {
             event.preventDefault();
             const form = event.target;
@@ -922,7 +1003,7 @@
             const tanggal = form.querySelector('input[type="date"]').value;
             const nominal = form.querySelector('input[type="number"]').value;
             
-            let kategori = expenseKategoriSelect.value;
+            let kategori = form.querySelector('select').value;
             if (type === 'pengeluaran' && kategori === 'Kebutuhan Dapur') {
                 kategori = expenseDapurKategoriSelect.value;
             }
@@ -966,7 +1047,7 @@
                 kategori,
                 keterangan,
                 bukti: fileUrl,
-                created_at: tanggal // Menyimpan tanggal yang dipilih pengguna
+                created_at: tanggal
             });
 
             if (error) {
@@ -978,7 +1059,6 @@
                 }
             } else {
                 form.reset();
-                // Setel ulang tanggal ke hari ini setelah submit berhasil
                 incomeTanggalInput.valueAsDate = new Date();
                 expenseTanggalInput.valueAsDate = new Date();
                 expenseDapurContainer.classList.add('hidden');
@@ -994,7 +1074,6 @@
         expenseForm.addEventListener('submit', (e) => handleFormSubmit(e, 'pengeluaran'));
 
 
-        // PDF Export
         exportPdfButton.addEventListener('click', async () => {
             pdfErrorEl.textContent = '';
             exportPdfButton.textContent = 'Membuat PDF...';
@@ -1048,10 +1127,9 @@
                 doc.setFont(undefined, 'bold');
                 doc.text(`Sisa Saldo (dari hasil filter): ${formatCurrency(balance)}`, 14, finalY + 22);
 
-                // Add stats to PDF
                 const stats = calculateExpenseStats(filteredTransactions);
                 if (stats) {
-                    finalY = finalY + 22; // update finalY
+                    finalY = finalY + 22; 
                     doc.setFontSize(10);
                     doc.setFont(undefined, 'normal');
                     doc.text(`Pengeluaran Tertinggi: ${stats.highest.category} (${formatCurrency(stats.highest.amount)})`, 14, finalY + 7);
@@ -1061,7 +1139,6 @@
                 const date = new Date().toISOString().split('T')[0];
                 const fileName = `laporan-kas_${date}.pdf`;
 
-                // Langsung unduh file ke komputer
                 doc.save(fileName);
                 pdfErrorEl.textContent = 'Unduhan PDF telah dimulai.';
 
@@ -1077,7 +1154,6 @@
             }
         });
 
-        // Gemini Summary
         geminiSummaryButton.addEventListener('click', async () => {
             geminiSummaryPlaceholder.textContent = 'Menganalisis data dengan AI...';
             geminiSummaryContent.classList.add('hidden');
@@ -1098,7 +1174,7 @@
 
             const userQuery = `Anda adalah asisten keuangan cerdas untuk sebuah pondok pesantren. Berdasarkan data transaksi dalam format JSON berikut, buatlah ringkasan analisis dalam satu paragraf singkat (sekitar 3-4 kalimat) dalam Bahasa Indonesia. Fokus pada: 1. Total pemasukan dan pengeluaran. 2. Kategori pengeluaran terbesar. 3. Berikan satu saran praktis atau wawasan yang bisa membantu pengelolaan keuangan pesantren ke depannya. Data Transaksi: ${JSON.stringify(simplifiedData)}`;
             const apiKey = "";
-            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${apiKey}`;
+            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
 
             try {
                 const payload = {
@@ -1153,16 +1229,13 @@
             }
         });
 
-        // Set default date for forms
         const setDefaultDates = () => {
             incomeTanggalInput.valueAsDate = new Date();
             expenseTanggalInput.valueAsDate = new Date();
         };
 
-        // Inisialisasi aplikasi
         setDefaultDates();
         checkSession();
     </script>
 </body>
 </html>
-
